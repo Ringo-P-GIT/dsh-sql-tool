@@ -102,7 +102,10 @@ function tok(type, text, line, col) {
   return { type, text, line, col };
 }
 
-const isWordChar = c => /[a-zA-Z0-9_]/.test(c);
+// 词内字符。必须含 `$`:部分方言/平台用 $ 前缀($getForm)。
+// 曾因这里漏掉 $ 而外层判断(含 $)与内层 gather(不含 $)不匹配 —— gather 返回空串
+// 且 i 不前进,词法器死循环疯狂分配 token,直接把宿主服务 OOM 掉。
+const isWordChar = c => /[a-zA-Z0-9_$]/.test(c);
 
 // ════════════════════════════════════════════════════════════
 // Lexer
@@ -209,7 +212,11 @@ function lex(text) {
       cur.push(t);
     }
 
+    let guardI = -1;
     while (!done() && depth > 0) {
+      // 结构性保险:一个字符都没吃就强制前进(空转 = 无限分配 = OOM 崩宿主)
+      if (i === guardI) { pushTok(tok(T.OP, src[i], line, col)); advance(1); continue; }
+      guardI = i;
       const c0 = ch();
 
       if (c0 === '\'') { pushTok(scanString()); continue; }
@@ -274,6 +281,8 @@ function lex(text) {
       if (/[a-zA-Z_$]/.test(c0)) {
         const wl = line, wc = col;
         const word = gather(c0 => isWordChar(c0));
+        // 安全网:gather 返回空串 = 一个字符都没吃,i 不会前进。此处绝不空转。
+        if (word === '') { pushTok(tok(T.OP, c0, line, col)); advance(1); lastWasComma = false; continue; }
         const uc = word.toUpperCase();
         const asIdent = isIdentContext(lastSig(cur));
         pushTok(!asIdent && KEYWORDS.has(uc) ? tok(T.KEYWORD, word, wl, wc) : tok(T.IDENT, word, wl, wc));
@@ -349,7 +358,13 @@ function lex(text) {
   }
 
   // ── 主循环 ────────────────────────────────────────────────
+  // 结构性保险:任何分支只要一个字符都没吃,下一轮就在这里强制前进。
+  // 词法器空转 = 无限分配 token = 宿主服务 OOM 崩溃(实测发生过一次,
+  // 输入含 $getForm 时 isWordChar 漏掉 $ 导致 gather 返回空串),从架构上杜绝。
+  let guardI = -1;
   while (!done()) {
+    if (i === guardI) { tokens.push(tok(T.OP, src[i], line, col)); advance(1); continue; }
+    guardI = i;
     const c0 = ch();
     const l = line, c = col;
 
@@ -418,6 +433,8 @@ function lex(text) {
     }
     if (/[a-zA-Z_$]/.test(c0)) {
       const word = gather(c0 => isWordChar(c0));
+      // 安全网:gather 返回空串 = 一个字符都没吃,i 不会前进。此处绝不空转。
+      if (word === '') { tokens.push(tok(T.OP, c0, l, c)); advance(1); continue; }
       const uc = word.toUpperCase();
       const asIdent = isIdentContext(lastSig(tokens));
       tokens.push(!asIdent && KEYWORDS.has(uc) ? tok(T.KEYWORD, word, l, c) : tok(T.IDENT, word, l, c));
