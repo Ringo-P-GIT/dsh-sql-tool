@@ -53,7 +53,7 @@ const diag = engine.process({ text: sql, mode: 'validate' }).diagnostics;
 输入(单行,含 ORM 生成的冗余分组括号):
 
 ```sql
-select `a`.`id`,`a`.`name`,`a`.`project_number`,(case `a`.`state` when '1' then '研发阶段' when '2' then '立项阶段' when '6' then '开发中' else NULL end) as `state` from (((`moffi`.`project` `a` left join `moffi`.`staff` `b` on((`a`.`id` = `b`.`pid`))) left join `moffi`.`org` `c` on((`a`.`oid` = `c`.`id`)))) where `a`.`type` in ('1','6')
+select `a`.`id`,`a`.`name`,`a`.`project_number`,(case `a`.`state` when '1' then '研发阶段' when '2' then '立项阶段' when '6' then '开发中' else NULL end) as `state` from (((`demo`.`project` `a` left join `demo`.`staff` `b` on((`a`.`id` = `b`.`pid`))) left join `demo`.`org` `c` on((`a`.`oid` = `c`.`id`)))) where `a`.`type` in ('1','6')
 ```
 
 输出:
@@ -69,9 +69,9 @@ SELECT
         WHEN '6' THEN '开发中'
         ELSE NULL
     END) AS `state`
-FROM (((`moffi`.`project` `a`
-LEFT JOIN `moffi`.`staff` `b` ON ((`a`.`id` = `b`.`pid`)))
-LEFT JOIN `moffi`.`org` `c` ON ((`a`.`oid` = `c`.`id`))))
+FROM (((`demo`.`project` `a`
+LEFT JOIN `demo`.`staff` `b` ON ((`a`.`id` = `b`.`pid`)))
+LEFT JOIN `demo`.`org` `c` ON ((`a`.`oid` = `c`.`id`))))
 WHERE `a`.`type` IN ('1', '6')
 ```
 
