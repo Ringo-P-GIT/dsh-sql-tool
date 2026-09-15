@@ -1,0 +1,4 @@
+# dsh-sql-tool bundle patch: registers the plugin as a DSH bundle.
+- insert:
+    - id: dsh-sql-tool
+      name: 'dsh-sql-tool'
