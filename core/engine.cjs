@@ -139,6 +139,11 @@ function lex(text) {
     while (!done() && (ch() === ' ' || ch() === '\t')) advance(1);
   }
 
+  // 邮箱上下文判定:@ 前邻字符是邮箱合法字符(字母/数字/_./%+-) → 视为邮箱地址,不是宏。
+  function isEmailAt() {
+    return i > 0 && /[a-zA-Z0-9._%+-]/.test(src[i - 1]);
+  }
+
   // ── 扫描字符串:i 指向开引号,返回 STRING token(segs 含内部宏) ──
   function scanString() {
     const sl = line, sc = col;
@@ -147,14 +152,14 @@ function lex(text) {
     let closed = false;
     while (!done()) {
       if (ch() === '\'') { advance(1); closed = true; break; }
-      if (ch() === '@' && /[a-zA-Z]/.test(peek(1))) {
+      if (ch() === '@' && /[a-zA-Z]/.test(peek(1)) && !isEmailAt()) {
         const sub = scanMacro();
         segs.push({ kind: 'macro', token: sub });
         if (sub.type === T.MACRO) allMacros.push(sub);
         continue;
       }
       const tl = line, tc = col;
-      const raw = gather(c0 => c0 !== '\'' && !(c0 === '@' && /[a-zA-Z]/.test(peek(1))));
+      const raw = gather(c0 => c0 !== '\'' && !(c0 === '@' && /[a-zA-Z]/.test(peek(1)) && !isEmailAt()));
       if (raw) segs.push({ kind: 'text', text: raw, line: tl, col: tc });
     }
     if (!closed) {
@@ -257,6 +262,16 @@ function lex(text) {
         continue;
       }
       if (c0 === '@' && /[a-zA-Z]/.test(peek(1))) {
+        if (isEmailAt()) {
+          // 邮箱上下文(宏参数里的裸邮箱,如 @equals(...,huweitao@hyperchain.cn)):
+          // 整段 @+域名 作为 IDENT,不拆成 ATBAD,否则会误报"疑似想写 @xxx("
+          const el = line, ec = col;
+          advance(1); // @
+          const rest = gather(x => /[a-zA-Z0-9._%+-]/.test(x));
+          pushTok(tok(T.IDENT, '@' + rest, el, ec));
+          lastWasComma = false;
+          continue;
+        }
         const sub = scanMacro();
         pushTok(sub);
         if (sub.type === T.MACRO) allMacros.push(sub);
@@ -402,12 +417,29 @@ function lex(text) {
 
     // ── 宏 ──
     if (c0 === '@' && /[a-zA-Z]/.test(peek(1))) {
+      if (isEmailAt()) {
+        // 邮箱上下文(如 huweitao@hyperchain.cn):整段 @+邮箱后缀作为 IDENT,
+        // 不进入宏扫描,避免误报"疑似想写 @xxx("及更糟的 ATBAD 诊断。
+        const el = line, ec = col;
+        advance(1); // @
+        const rest = gather(x => /[a-zA-Z0-9._%+-]/.test(x));
+        tokens.push(tok(T.IDENT, '@' + rest, el, ec));
+        continue;
+      }
       const m = scanMacro();
       if (m.type === T.MACRO) allMacros.push(m);
       tokens.push(m);
       continue;
     }
     if (c0 === '@') {
+      // 孤立 @:不可能有宏后缀(字母),但邮局语境中 @1.com 仍属邮箱后缀 → 同上前缀
+      if (isEmailAt()) {
+        const el = line, ec = col;
+        advance(1);
+        const rest = gather(x => /[a-zA-Z0-9._%+-]/.test(x));
+        tokens.push(tok(T.IDENT, '@' + rest, el, ec));
+        continue;
+      }
       tokens.push(tok(T.ATBAD, '@', l, c));
       advance(1);
       continue;
