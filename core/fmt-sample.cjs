@@ -1,6 +1,6 @@
-// 样例格式化器:node fmt-sample.js <文件>
+// 样例格式化器:node core/fmt-sample.cjs <文件>
 const fs = require('fs');
-const eng = require('./engine.js');
+const eng = require('./engine.cjs');
 const p = process.argv[2];
 const text = fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n').replace(/\n$/, '');
 const r = eng.process({ text, mode: 'format', funcList: eng.DEFAULT_FUNCS });

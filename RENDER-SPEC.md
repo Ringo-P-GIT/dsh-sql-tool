@@ -1,7 +1,7 @@
 # dsh-sql-tool 渲染规范（RENDER-SPEC）
 
 > 版本 v1.0 · 2026-09-12 · 适用范围：`sql_tool` 输出的一切可视化（对话内 VCP 卡片、未来的侧栏面板、复制/导出产物）
-> 引擎（`core/engine.js`）**只产出纯文本 + token 类型，不含任何颜色**。颜色是渲染层的映射结果——所以改配色与改引擎解耦，本文件是唯一配色权威。
+> 引擎（`core/engine.cjs`）**只产出纯文本 + token 类型，不含任何颜色**。颜色是渲染层的映射结果——所以改配色与改引擎解耦，本文件是唯一配色权威。
 
 ---
 
@@ -81,7 +81,7 @@ stripTags(painted) === result.formatted   // 必须为 true
 
 ## 4. token 类型映射表
 
-引擎词法常量 `T`（`core/engine.js` 第 50 行起）：
+引擎词法常量 `T`（`core/engine.cjs` 第 67 行起）：
 
 | token 类型 | 含义 | 颜色 |
 |---|---|---|

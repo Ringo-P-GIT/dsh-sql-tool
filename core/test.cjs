@@ -1,6 +1,6 @@
 'use strict';
 /* dsh-sql-core 单测:需求稿 §8 T5 变异用例 + T3 粘连 12 处 + §4.1 示例 + JSON/替换 */
-const eng = require('./engine');
+const eng = require('./engine.cjs');
 const { process, lex, format, replaceAll, extractMacros, DEFAULT_FUNCS, buildFuncMap } = eng;
 
 let pass = 0, fail = 0;

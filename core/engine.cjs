@@ -423,6 +423,28 @@ function lex(text) {
       tokens.push(!asIdent && KEYWORDS.has(uc) ? tok(T.KEYWORD, word, l, c) : tok(T.IDENT, word, l, c));
       continue;
     }
+    // ── 反引号引用标识符(MySQL):`a` / `project_number` ──
+    // 必须整体成一个 token。否则 ` 会落进下面的兜底成为 OP,而格式化器有
+    // 「前一个 token 是 OP 就补空格」的规则,会把 ` 和标识符拆开——
+    // 实测 bug:输入 `a`.`project_number`,输出成 ` a`.` project_number`。
+    if (c0 === '`') {
+      const ql = l, qc = c;
+      advance(1);
+      const name = gather(x => x !== '`');
+      if (ch() === '`') {
+        advance(1);
+        tokens.push(tok(T.IDENT, '`' + name + '`', ql, qc));
+      } else {
+        // 未闭合:原样保留,并报一条诊断(绝不丢弃字符)
+        tokens.push(tok(T.IDENT, '`' + name, ql, qc));
+        diagnostics.push({
+          line: ql, col: qc, level: 'error', rule: 'quote',
+          message: '反引号标识符缺少闭合的 `',
+          fix: '在末尾补一个 `',
+        });
+      }
+      continue;
+    }
     // 兜底:未知字符原样保留为 OP,绝不丢弃
     tokens.push(tok(T.OP, c0, l, c));
     advance(1);
@@ -684,6 +706,8 @@ function format(tokens, options) {
     let curIndent = baseIndent;
     let pendingSpace = false;
     let prev = null;
+    let selectBreak = false;   // 顶层 SELECT 列表是否已开启"一列一行"
+    const caseStack = [];      // CASE 表达式栈:{indent, broken} —— 够宽才拆 WHEN/ELSE/END
     const parenStack = [];   // 括号层级栈:{broken} 该层内是否已经换行(决定 ) 是否独占一行)
 
     const cur = () => lines[lines.length - 1];
@@ -698,8 +722,61 @@ function format(tokens, options) {
       if (parenStack.length) parenStack[parenStack.length - 1].broken = true;
     };
     const add = s => setCur(cur() + s);
-    // 子句换行的基准缩进:每深入一层括号多一级
-    const clauseIndent = () => baseIndent + parenStack.length * IND;
+    // 子句换行的基准缩进。
+    // 只让「含子查询的括号」累加缩进:ORM 生成器常见的 ((((( A JOIN B ) JOIN C ) ...)))
+    // 是纯分组括号,按层数累加就会把 LEFT JOIN 一层层顶到第 20 列 —— 即"括号阶梯"。
+    const indentDepth = () => parenStack.reduce((n, f) => n + (f.sub ? 1 : 0), 0);
+    const clauseIndent = () => baseIndent + indentDepth() * IND;
+
+    // 该括号块顶层是否含 SELECT(子查询)—— 只有子查询值得多缩一级
+    function blockHasSelect(toks, k) {
+      let depth = 0;
+      for (let x = k; x < toks.length; x++) {
+        const t = toks[x];
+        if (t.type === T.PAREN) {
+          depth += (t.text === '(') ? 1 : -1;
+          if (depth === 0) break;
+          continue;
+        }
+        if (depth === 1 && t.type === T.KEYWORD && t.text.toUpperCase() === 'SELECT') return true;
+      }
+      return false;
+    }
+
+    // 顶层 SELECT 列表是否够宽 —— 够宽才一列一行;短查询保持紧凑,不给读者制造噪声
+    function selectListWide(toks, k) {
+      let depth = 0, w = 0, commas = 0;
+      for (let x = k + 1; x < toks.length; x++) {
+        const t = toks[x];
+        if (t.type === T.PAREN) {
+          depth += (t.text === '(') ? 1 : -1;
+          w += 1;
+          if (depth < 0) break;
+          continue;
+        }
+        if (depth === 0) {
+          if (t.type === T.KEYWORD && CLAUSE_KW.has(t.text.toUpperCase())) break;
+          if (t.type === T.COMMA) commas++;
+        }
+        w += (t.text ? t.text.length : 0) + 1;
+      }
+      return commas > 0 && w > INLINE_MAX;
+    }
+
+    // CASE 表达式是否够宽 —— 够宽才拆 WHEN/ELSE/END(短 CASE 保持一行)
+    function caseWide(toks, k) {
+      let depth = 0, w = 0;
+      for (let x = k; x < toks.length; x++) {
+        const t = toks[x];
+        w += (t.text ? t.text.length : 0) + 1;
+        if (t.type === T.KEYWORD) {
+          const u = t.text.toUpperCase();
+          if (u === 'CASE') depth++;
+          else if (u === 'END') { depth--; if (depth === 0) break; }
+        }
+      }
+      return w > INLINE_MAX;
+    }
 
     // 当前 token 前是否需要空格
     function spaceBefore(t) {
@@ -748,10 +825,12 @@ function format(tokens, options) {
           if (spaceBefore(t)) add(' ');
           add('(');
           // 只有"够宽"的括号块才允许内部拆子句;短子查询保持一行
-          parenStack.push({ broken: false, wide: parenInlineWidth(toks, k) > INLINE_MAX });
+          parenStack.push({ broken: false, wide: parenInlineWidth(toks, k) > INLINE_MAX, sub: blockHasSelect(toks, k) });
         } else {
           const top = parenStack.pop();
-          if (top && top.broken) newLine(clauseIndent());
+          // 连续闭合括号并到同一行,否则 ((((( ... ))))) 的收尾会摊成 5 行孤零零的 )
+          // (以 END 收尾的 CASE 同理:END) AS x 比 END\n) AS x 可读)
+          if (top && top.broken && !/(\)|END)$/.test(cur().trim())) newLine(clauseIndent());
           add(')');
         }
         prev = t; pendingSpace = false; continue;
@@ -778,10 +857,45 @@ function format(tokens, options) {
         prev = t; pendingSpace = false; continue;
       }
 
+      // CASE 够宽时:WHEN / ELSE 各起一行(缩进 +1),END 回到 CASE 同级
+      if (!compact && t.type === T.KEYWORD && caseStack.length > 0) {
+        const ck = t.text.toUpperCase();
+        const ctop = caseStack[caseStack.length - 1];
+        if (ctop.broken) {
+          if (ck === 'WHEN' || ck === 'ELSE') newLine(ctop.indent + IND);
+          else if (ck === 'END') newLine(ctop.indent);
+        }
+      }
+
       const text = (t.type === T.KEYWORD) ? t.text.toUpperCase() : t.text;
+
+      // 顶层 SELECT 列表:逗号后换行 → 一列一行(仅长列表展开,短查询不动)
+      if (t.type === T.COMMA && selectBreak && parenStack.length === 0 && !compact) {
+        add(',');
+        newLine(baseIndent + IND);
+        // 不要复原 prev:newLine 已把它置空,复原会让下一列多顶一个空格(4 → 5 列)
+        continue;
+      }
+
       if (spaceBefore(t)) add(' ');
       add(text);
       prev = t; pendingSpace = false;
+
+      if (!compact && t.type === T.KEYWORD) {
+        const uk = t.text.toUpperCase();
+        // SELECT 之后换行,让第一列也独立成行;遇到后续顶层子句则收尾
+        if (parenStack.length === 0) {
+          if (uk === 'SELECT' && selectListWide(toks, k)) {
+            selectBreak = true;
+            newLine(baseIndent + IND);
+          } else if (CLAUSE_KW.has(uk)) {
+            selectBreak = false;
+          }
+        }
+        // CASE 入栈 / END 出栈(每个 CASE 都入栈,但只有够宽的才拆行,嵌套时不会错位)
+        if (uk === 'CASE') caseStack.push({ indent: curIndent, broken: caseWide(toks, k) });
+        else if (uk === 'END' && caseStack.length > 0) caseStack.pop();
+      }
     }
 
     flush();

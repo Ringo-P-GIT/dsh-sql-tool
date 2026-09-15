@@ -27,7 +27,7 @@ SQL(含 `@` 宏)与 JSON 的格式化 / 校验 / 自动修复工具,深度支持
 ## 快速上手
 
 ```js
-const engine = require('./core/engine.js');
+const engine = require('./core/engine.cjs');
 
 // 格式化 + 自动修复(fix 模式)
 const r = engine.process({
@@ -49,9 +49,9 @@ const diag = engine.process({ text: sql, mode: 'validate' }).diagnostics;
 ## 目录结构
 
 ```
-core/engine.js      引擎:lexer / formatter / validators / autofix / JSON
-core/test.js        测试套件(node core/test.js,88+ 用例)
-core/fmt-sample.js  格式化示例
+core/engine.cjs      引擎:lexer / formatter / validators / autofix / JSON
+core/test.cjs        测试套件(node core/test.cjs,88+ 用例)
+core/fmt-sample.cjs  格式化示例
 samples/            真实业务 SQL 样例
 RENDER-SPEC.md      渲染规范(配色权威,引擎只产出纯文本+token 类型)
 ```
@@ -59,7 +59,7 @@ RENDER-SPEC.md      渲染规范(配色权威,引擎只产出纯文本+token 类
 ## 测试
 
 ```bash
-node core/test.js
+node core/test.cjs
 # 结果: N 通过, 0 失败
 ```
 
