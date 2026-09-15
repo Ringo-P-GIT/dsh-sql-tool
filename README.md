@@ -85,6 +85,7 @@ core/test.cjs        测试套件(node core/test.cjs,87 用例)
 core/fmt-sample.cjs  格式化示例
 samples/            真实业务 SQL 样例
 RENDER-SPEC.md      渲染规范(配色权威,引擎只产出纯文本+token 类型)
+docs/DEBUG-NOTES.md 排查笔记:三个「表面能用」的 bug(报错/变形/沉默)
 ```
 
 ## 测试
